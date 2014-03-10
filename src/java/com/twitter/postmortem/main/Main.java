@@ -1,7 +1,9 @@
 package com.twitter.postmortem.main;
 
 import java.net.InetSocketAddress;
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.List;
 
 import com.google.common.collect.ImmutableMap;
 import com.google.inject.AbstractModule;
@@ -21,7 +23,7 @@ import com.twitter.common.application.modules.StatsModule;
 import com.twitter.common.args.Arg;
 import com.twitter.common.args.CmdLine;
 import com.twitter.common.args.constraints.NotNull;
-import com.twitter.common.base.Closure;
+import com.twitter.common.base.Function;
 import com.twitter.postmortem.handler.ReadHandler;
 import com.twitter.postmortem.handler.WriteHandler;
 
@@ -38,12 +40,31 @@ public class Main extends AbstractApplication {
 
   @Override
   public Iterable<? extends Module> getModules() {
+    final List<String> arrayList = new ArrayList<String>();
     return Arrays.asList(
         new HttpModule(),
         new LogModule(),
         new StatsModule(),
         new AbstractModule() {
           @Override protected void configure() {
+            bind(new TypeLiteral<Function<String, String>>() { }).toInstance(
+                new Function<String, String>() {
+                  private List<String> datastore = arrayList;
+
+                  @Override
+                  public String apply(String data) {
+                    if (data.equals("")) {
+                      String allOfIt = new String();
+                      for (String s : datastore) {
+                        allOfIt += s;
+                      }
+                      return allOfIt;
+                    } else {
+                      datastore.add(data + "\n");
+                      return "\n";
+                    }
+                  }
+                });
             install(new JerseyServletModule() {
               @Override protected void configureServlets() {
                 filter("/write*").through(
