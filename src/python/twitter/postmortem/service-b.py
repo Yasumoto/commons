@@ -29,7 +29,7 @@ class ServiceB(Observable):
     self._service_c_reads.increment()
     request = urllib2.Request('http://%s/read/%s' % (SERVICE_C_PATH, message))
     try:
-      return urllib2.urlopen(request, message)
+      return urllib2.urlopen(request)
     except urllib2.URLError as e:
       self._service_c_errors.increment()
       log.error("Could not read messages: %s to %s: %s" %
