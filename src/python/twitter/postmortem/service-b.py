@@ -25,15 +25,15 @@ class ServiceB(Observable):
     self.metrics.register(self._service_c_reads)
     self.metrics.register(self._service_c_errors)
 
-  def read_messages(self, message):
+  def read_messages(self):
     self._service_c_reads.increment()
-    request = urllib2.Request('http://%s/read/%s' % (SERVICE_C_PATH, message))
+    request = urllib2.Request('http://%s/read' % SERVICE_C_PATH)
     try:
       return urllib2.urlopen(request)
     except urllib2.URLError as e:
       self._service_c_errors.increment()
-      log.error("Could not read messages: %s to %s: %s" %
-          (message, SERVICE_C_PATH, e))
+      log.error("Could not read messages from %s: %s" %
+          (SERVICE_C_PATH, e))
       return None
 
   def write_message(self, message):
@@ -54,7 +54,7 @@ class ServiceB(Observable):
     message = request.body.getvalue()
     self._incoming_requests.increment()
     self.write_message(message)
-    return self.read_messages(message)
+    return self.read_messages()
 
 
 @app.default_command

@@ -29,9 +29,9 @@ public class WriteHandler {
    */
   @POST
   @Path("")
-  public String writeData() {
+  public String writeData(String data) {
     WRITES.incrementAndGet();
-    LOG.info("Writing data!");
-    return datastore.apply("TODO(jsmith): We need real data");
+    LOG.info("Writing data from the POST request: " + data);
+    return datastore.apply(data);
   }
 }
