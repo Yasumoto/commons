@@ -135,6 +135,7 @@ class ServerSetModule(app.Module):
 
     # TODO(wickman) Add timeout parameterization here.
     self._zookeeper = ZooKeeper(options.serverset_module_ensemble)
+    self._zookeeper =
     self._serverset = ServerSet(self._zookeeper, options.serverset_module_path)
     self._join_args = (primary, additional)
     self._join_kwargs = ({'shard': options.serverset_module_shard_id}

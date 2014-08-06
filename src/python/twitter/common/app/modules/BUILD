@@ -60,7 +60,8 @@ python_library(
   name = "serverset",
   sources = ['serverset.py'],
   dependencies = [
-    pants('src/python/twitter/common/zookeeper/serverset')
+    pants('src/python/twitter/common/app'),
+    pants('src/python/twitter/common/zookeeper/serverset'),
   ]
 )
 

@@ -1,3 +1,3 @@
-from twiter.common.app.modules import serverset
+from twitter.common.app.modules import serverset
 
 import mock
