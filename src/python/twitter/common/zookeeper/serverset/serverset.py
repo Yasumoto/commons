@@ -5,33 +5,17 @@ except ImportError:
 
 from twitter.common.zookeeper.group.group_base import GroupInterface
 
-try:
-  from twitter.common.zookeeper.client import ZooKeeper
-  from twitter.common.zookeeper.group.group import (
-      ActiveGroup,
-      Group)
-  def pick_zkpython_group(zk, on_join, on_leave):
-    # The default underlying implementation is Group if no active monitoring
-    # is requested of the ServerSet.  If active monitoring is requested by
-    # on_join or on_leave, then use ActiveGroup by default, which has better
-    # performance on monitor/iter calls.
-    if isinstance(zk, ZooKeeper):
-      return Group if (on_join is None and on_leave is None) else ActiveGroup
-except ImportError as e:
-  def pick_zkpython_group(zk, on_join, on_leave):
-    return None
+from kazoo.client import KazooClient
+from twitter.common.zookeeper.group.group import ActiveGroup, Group
+def pick_kazoo_group(zk, on_join, on_leave):
+  # The default underlying implementation is Group if no active monitoring
+  # is requested of the ServerSet.  If active monitoring is requested by
+  # on_join or on_leave, then use ActiveGroup by default, which has better
+  # performance on monitor/iter calls.
+  if isinstance(zk, KazooClient):
+    return KazooGroup if (on_join is None and on_leave is None) else ActiveKazooGroup
 
-try:
-  from kazoo.client import KazooClient
-  from twitter.common.zookeeper.group.kazoo_group import ActiveKazooGroup, KazooGroup
-  def pick_kazoo_group(zk, on_join, on_leave):
-    if isinstance(zk, KazooClient):
-      return KazooGroup if (on_join is None and on_leave is None) else ActiveKazooGroup
-except ImportError as e:
-  def pick_kazoo_group(zk, on_join, on_leave):
-    return None
-
-GROUP_SELECTORS = [pick_zkpython_group, pick_kazoo_group]
+GROUP_SELECTORS = [pick_kazoo_group]
 
 from .endpoint import ServiceInstance
 

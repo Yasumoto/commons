@@ -2,7 +2,7 @@ python_test_suite(
   name = 'all',
   dependencies = [
     pants(':endpoint'),
-    pants(':test_kazoo_serverset'),
+    pants(':test_serverset'),
     pants(':test_serverset_unit'),
   ],
 )
@@ -16,11 +16,11 @@ python_library(
 )
 
 python_tests(
-  name = 'test_kazoo_serverset',
-  sources = ['test_kazoo_serverset.py'],
+  name = 'test_serverset',
+  sources = ['test_serverset.py'],
   dependencies = [
     pants(':test_base'),
-    pants('src/python/twitter/common/zookeeper/serverset:kazoo_serverset'),
+    pants('src/python/twitter/common/zookeeper/serverset'),
   ],
 )
 
@@ -39,7 +39,7 @@ python_tests(
     pants('3rdparty/python:mock'),
     pants('3rdparty/python:kazoo'),
     pants('src/python/twitter/common/zookeeper/group:group_base'),
-    pants('src/python/twitter/common/zookeeper/group:kazoo_group'),
+    pants('src/python/twitter/common/zookeeper/group:group'),
     pants('src/python/twitter/common/zookeeper/serverset'),
   ],
 )

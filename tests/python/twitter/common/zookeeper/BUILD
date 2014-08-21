@@ -13,6 +13,8 @@ python_tests(
     pants('src/python/twitter/common/log'),
     pants('src/python/twitter/common/zookeeper:client'),
     pants('src/python/twitter/common/zookeeper:testing'),
+    pants('3rdparty/python:kazoo'),
+    pants('3rdparty/python:mock'),
   ],
   sources = ['client_test.py'],
   coverage = 'twitter.common.zookeeper.client'
