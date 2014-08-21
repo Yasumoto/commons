@@ -62,6 +62,8 @@ python_library(
   dependencies = [
     pants('src/python/twitter/common/app'),
     pants('src/python/twitter/common/zookeeper/serverset'),
+    pants('3rdparty/python:kazoo')
+
   ]
 )
 

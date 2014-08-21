@@ -17,14 +17,6 @@ python_library(
   ]
 )
 
-python_library(
-  name = 'kazoo_serverset',
-  dependencies = [
-    pants(':serverset_base'),
-    pants('src/python/twitter/common/zookeeper/group:kazoo_group'),
-  ]
-)
-
 python_binary(
   name = 'cli',
   source = 'cli.py',

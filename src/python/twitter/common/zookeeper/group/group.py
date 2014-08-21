@@ -1,7 +1,7 @@
-import functools
+from functools import partial
+import itertools
 import posixpath
 import threading
-import time
 
 try:
   from twitter.common import log
@@ -9,9 +9,6 @@ except ImportError:
   import logging as log
 
 from twitter.common.concurrent import Future
-from twitter.common.exceptions import ExceptionalThread
-from twitter.common.quantity import Amount, Time
-from twitter.common.zookeeper.constants import ReturnCode
 
 from .group_base import (
     Capture,
@@ -20,47 +17,87 @@ from .group_base import (
     Membership,
     set_different)
 
-import zookeeper
+from kazoo.client import KazooClient
+from kazoo.protocol.states import (
+    EventType,
+    KazooState,
+    KeeperState)
+
+import kazoo.security as ksec
+import kazoo.exceptions as ke
 
 
-class Group(GroupBase, GroupInterface):
+# TODO(wickman) Put this in twitter.common somewhere?
+def partition(items, predicate=bool):
+  a, b = itertools.tee((predicate(item), item) for item in items)
+  return ([item for pred, item in a if not pred], [item for pred, item in b if pred])
+
+
+class KazooGroup(GroupBase, GroupInterface):
   """
-    An implementation of GroupInterface against CZookeeper.
+    An implementation of GroupInterface against Kazoo.
   """
+  DISCONNECT_EXCEPTIONS = (ke.ConnectionLoss, ke.OperationTimeoutError, ke.SessionExpiredError)
+
+  @classmethod
+  def translate_acl(cls, acl):
+    if not isinstance(acl, dict) or any(key not in acl for key in ('perms', 'scheme', 'id')):
+      raise TypeError('Expected acl to be Acl-like, got %s' % type(acl))
+    return ksec.ACL(acl['perms'], ksec.Id(acl['scheme'], acl['id']))
+
+  @classmethod
+  def translate_acl_list(cls, acls):
+    if acls is None:
+      return acls
+    try:
+      acls = list(acls)
+    except (ValueError, TypeError):
+      raise TypeError('ACLs should be a list, got %s' % type(acls))
+    if all(isinstance(acl, ksec.ACL) for acl in acls):
+      return acls
+    else:
+      return [cls.translate_acl(acl) for acl in acls]
 
   def __init__(self, zk, path, acl=None):
+    if not isinstance(zk, KazooClient):
+      raise TypeError('KazooGroup must be initialized with a KazooClient')
     self._zk = zk
+    self.__state = zk.state
+    self.__listener_queue = []
+    self.__queue_lock = threading.Lock()
+    self._zk.add_listener(self.__state_listener)
     self._path = '/' + '/'.join(filter(None, path.split('/')))  # normalize path
     self._members = {}
     self._member_lock = threading.Lock()
-    self._acl = acl or zk.DEFAULT_ACL
+    self._acl = self.translate_acl_list(acl)
 
-  def _prepare_path(self, success):
-    class Background(ExceptionalThread):
-      BACKOFF = Amount(5, Time.SECONDS)
-      def run(_):
-        child = '/'
-        for component in self._path.split('/')[1:]:
-          child = posixpath.join(child, component)
-          while True:
-            try:
-              self._zk.create(child, "", self._acl)
-              break
-            except zookeeper.NodeExistsException:
-              break
-            except zookeeper.NoAuthException:
-              if self._zk.exists(child):
-                break
-              else:
-                success.set(False)
-                return
-            except zookeeper.OperationTimeoutException:
-              time.sleep(Background.BACKOFF.as_(Time.SECONDS))
-              continue
-        success.set(True)
-    background = Background()
-    background.daemon = True
-    background.start()
+  def __state_listener(self, state):
+    """Process appropriate callbacks on any kazoo state transition."""
+    with self.__queue_lock:
+      self.__state = state
+      self.__listener_queue, triggered = partition(self.__listener_queue,
+          lambda element: element[0] == state)
+    for _, callback in triggered:
+      callback()
+
+  def _once(self, keeper_state, callback):
+    """Ensure a callback is called once we reach the given state: either
+       immediately, if currently in that state, or on the next transition to
+       that state."""
+    invoke = False
+    with self.__queue_lock:
+      if self.__state != keeper_state:
+        self.__listener_queue.append((keeper_state, callback))
+      else:
+        invoke = True
+    if invoke:
+      callback()
+
+  def __on_connected(self, callback):
+    return self.__on_state(callback, KazooState.CONNECTED)
+
+  def __on_expired(self, callback):
+    return self.__on_state(callback, KazooState.LOST)
 
   def info(self, member, callback=None):
     if member == Membership.error():
@@ -69,12 +106,10 @@ class Group(GroupBase, GroupInterface):
     capture = Capture(callback)
 
     def do_info():
-      self._zk.aget(path, None, info_completion)
+      self._zk.get_async(path).rawlink(info_completion)
 
     with self._member_lock:
-      if member not in self._members:
-        self._members[member] = Future()
-      member_future = self._members[member]
+      member_future = self._members.setdefault(member, Future())
 
     member_future.add_done_callback(lambda future: capture.set(future.result()))
 
@@ -86,15 +121,20 @@ class Group(GroupBase, GroupInterface):
         except:
           pass
 
-    def info_completion(_, rc, content, stat):
-      if rc in self._zk.COMPLETION_RETRY:
-        do_info()
+    def info_completion(result):
+      try:
+        content, stat = result.get()
+      except self.DISCONNECT_EXCEPTIONS:
+        self._once(KazooState.CONNECTED, do_info)
         return
-      if rc == zookeeper.NONODE:
+      except ke.NoNodeException:
         future = self._members.pop(member, Future())
         future.set_result(Membership.error())
         return
-      elif rc != zookeeper.OK:
+      except ke.KazooException as e:
+        log.warning('Unexpected Kazoo result in info: (%s)%s' % (type(e), e))
+        future = self._members.pop(member, Future())
+        future.set_result(Membership.error())
         return
       self._members[member].set_result(content)
 
@@ -106,37 +146,45 @@ class Group(GroupBase, GroupInterface):
 
   def join(self, blob, callback=None, expire_callback=None):
     membership_capture = Capture(callback)
-    exists_capture = Capture(expire_callback)
-
-    def on_prepared(success):
-      if success:
-        do_join()
-      else:
-        membership_capture.set(Membership.error())
-
-    prepare_capture = Capture(on_prepared)
+    expiry_capture = Capture(expire_callback)
 
     def do_join():
-      self._zk.acreate(posixpath.join(self._path, self.MEMBER_PREFIX),
-          blob, self._acl, zookeeper.SEQUENCE | zookeeper.EPHEMERAL, acreate_completion)
+      self._zk.create_async(
+          path=posixpath.join(self._path, self.MEMBER_PREFIX),
+          value=blob,
+          acl=self._acl,
+          sequence=True,
+          ephemeral=True,
+          makepath=True
+      ).rawlink(acreate_completion)
 
-    def exists_watch(_, event, state, path):
-      if (event == zookeeper.SESSION_EVENT and state == zookeeper.EXPIRED_SESSION_STATE) or (
-          event == zookeeper.DELETED_EVENT):
-        exists_capture.set()
+    def do_exists(path):
+      self._zk.exists_async(path, watch=exists_watch).rawlink(partial(exists_completion, path))
 
-    def exists_completion(path, _, rc, stat):
-      if rc in self._zk.COMPLETION_RETRY:
-        self._zk.aexists(path, exists_watch, functools.partial(exists_completion, path))
+    def exists_watch(event):
+      if event.type == EventType.DELETED:
+        expiry_capture.set()
+
+    def expire_notifier():
+      self._once(KazooState.LOST, expiry_capture.set)
+
+    def exists_completion(path, result):
+      try:
+        if result.get() is None:
+          expiry_capture.set()
+      except self.DISCONNECT_EXCEPTIONS:
+        self._once(KazooState.CONNECTED, partial(do_exists, path))
+
+    def acreate_completion(result):
+      try:
+        path = result.get()
+      except self.DISCONNECT_EXCEPTIONS:
+        self._once(KazooState.CONNECTED, do_join)
         return
-      if rc == zookeeper.NONODE:
-        exists_capture.set()
-
-    def acreate_completion(_, rc, path):
-      if rc in self._zk.COMPLETION_RETRY:
-        do_join()
-        return
-      if rc == zookeeper.OK:
+      except ke.KazooException as e:
+        log.warning('Unexpected Kazoo result in join: (%s)%s' % (type(e), e))
+        membership = Membership.error()
+      else:
         created_id = self.znode_to_id(path)
         membership = Membership(created_id)
         with self._member_lock:
@@ -144,36 +192,36 @@ class Group(GroupBase, GroupInterface):
           result_future.set_result(blob)
           self._members[membership] = result_future
         if expire_callback:
-          self._zk.aexists(path, exists_watch, functools.partial(exists_completion, path))
-      else:
-        membership = Membership.error()
+          self._once(KazooState.CONNECTED, expire_notifier)
+          do_exists(path)
+
       membership_capture.set(membership)
 
-    self._prepare_path(prepare_capture)
+    do_join()
     return membership_capture()
 
   def cancel(self, member, callback=None):
     capture = Capture(callback)
 
     def do_cancel():
-      self._zk.adelete(posixpath.join(self._path, self.id_to_znode(member.id)),
-        -1, adelete_completion)
+      self._zk.delete_async(posixpath.join(self._path, self.id_to_znode(member.id))).rawlink(
+          adelete_completion)
 
-    def adelete_completion(_, rc):
-      if rc in self._zk.COMPLETION_RETRY:
-        do_cancel()
+    def adelete_completion(result):
+      try:
+        success = result.get()
+      except self.DISCONNECT_EXCEPTIONS:
+        self._once(KazooState.CONNECTED, do_cancel)
         return
-      # The rationale here is two situations:
-      #   - rc == zookeeper.OK ==> we successfully deleted the znode and the membership is dead.
-      #   - rc == zookeeper.NONODE ==> the membership is dead, though we may not have actually
-      #      been the ones to cancel, or the node never existed in the first place.  it's possible
-      #      we owned the membership but it got severed due to session expiration.
-      if rc == zookeeper.OK or rc == zookeeper.NONODE:
-        future = self._members.pop(member.id, Future())
-        future.set_result(Membership.error())
-        capture.set(True)
-      else:
-        capture.set(False)
+      except ke.NoNodeError:
+        success = True
+      except ke.KazooException as e:
+        log.warning('Unexpected Kazoo result in cancel: (%s)%s' % (type(e), e))
+        success = False
+
+      future = self._members.pop(member.id, Future())
+      future.set_result(Membership.error())
+      capture.set(success)
 
     do_cancel()
     return capture()
@@ -182,48 +230,62 @@ class Group(GroupBase, GroupInterface):
     capture = Capture(callback)
 
     def wait_exists():
-      self._zk.aexists(self._path, exists_watch, exists_completion)
+      self._zk.exists_async(self._path, exists_watch).rawlink(exists_completion)
 
-    def exists_watch(_, event, state, path):
-      if event == zookeeper.SESSION_EVENT and state == zookeeper.EXPIRED_SESSION_STATE:
+    def exists_watch(event):
+      if event.state == KeeperState.EXPIRED_SESSION:
         wait_exists()
         return
-      if event == zookeeper.CREATED_EVENT:
+      if event.type == EventType.CREATED:
         do_monitor()
-      elif event == zookeeper.DELETED_EVENT:
+      elif event.type == EventType.DELETED:
         wait_exists()
 
-    def exists_completion(_, rc, stat):
-      if rc == zookeeper.OK:
+    def exists_completion(result):
+      try:
+        stat = result.get()
+      except self.DISCONNECT_EXCEPTIONS:
+        self._once(KazooState.CONNECTED, wait_exists)
+        return
+      except ke.NoNodeError:
+        wait_exists()
+        return
+      except ke.KazooException as e:
+        log.warning('Unexpected exists_completion result: (%s)%s' % (type(e), e))
+        return
+
+      if stat:
         do_monitor()
 
     def do_monitor():
-      self._zk.aget_children(self._path, get_watch, get_completion)
+      self._zk.get_children_async(self._path, get_watch).rawlink(get_completion)
 
-    def get_watch(_, event, state, path):
-      if event == zookeeper.SESSION_EVENT and state == zookeeper.EXPIRED_SESSION_STATE:
+    def get_watch(event):
+      if event.state == KeeperState.EXPIRED_SESSION:
         wait_exists()
         return
-      if state != zookeeper.CONNECTED_STATE:
+      if event.state != KeeperState.CONNECTED:
         return
-      if event == zookeeper.DELETED_EVENT:
+      if event.type == EventType.DELETED:
         wait_exists()
         return
-      if event != zookeeper.CHILD_EVENT:
+      if event.type != EventType.CHILD:
         return
       if set_different(capture, membership, self._members):
         return
       do_monitor()
 
-    def get_completion(_, rc, children):
-      if rc in self._zk.COMPLETION_RETRY:
-        do_monitor()
+    def get_completion(result):
+      try:
+        children = result.get()
+      except self.DISCONNECT_EXCEPTIONS:
+        self._once(KazooState.CONNECTED, do_monitor)
         return
-      if rc == zookeeper.NONODE:
+      except ke.NoNodeError:
         wait_exists()
         return
-      if rc != zookeeper.OK:
-        log.warning('Unexpected get_completion return code: %s' % ReturnCode(rc))
+      except ke.KazooException as e:
+        log.warning('Unexpected get_completion result: (%s)%s' % (type(e), e))
         capture.set(set([Membership.error()]))
         return
       self._update_children(children)
@@ -233,22 +295,24 @@ class Group(GroupBase, GroupInterface):
     return capture()
 
   def list(self):
-    try:
-      return sorted(map(lambda znode: Membership(self.znode_to_id(znode)),
-          filter(self.znode_owned, self._zk.get_children(self._path))))
-    except zookeeper.NoNodeException:
-      return []
+    wait_event = threading.Event()
+    while True:
+      wait_event.clear()
+      try:
+        try:
+          return sorted(Membership(self.znode_to_id(znode))
+                        for znode in self._zk.get_children(self._path)
+                        if self.znode_owned(znode))
+        except ke.NoNodeException:
+          return []
+      except self.DISCONNECT_EXCEPTIONS:
+        self._once(KazooState.CONNECTED, wait_event.set)
+        wait_event.wait()
 
 
-class ActiveGroup(Group):
-  """
-    An implementation of GroupInterface against CZookeeper when iter() and
-    monitor() are expected to be called frequently.  Constantly monitors
-    group membership and the contents of group blobs.
-  """
-
+class ActiveKazooGroup(KazooGroup):
   def __init__(self, *args, **kwargs):
-    super(ActiveGroup, self).__init__(*args, **kwargs)
+    super(ActiveKazooGroup, self).__init__(*args, **kwargs)
     self._monitor_queue = []
     self._monitor_members()
 
@@ -256,48 +320,64 @@ class ActiveGroup(Group):
     capture = Capture(callback)
     if not set_different(capture, membership, self._members):
       self._monitor_queue.append((membership, capture))
-    return capture()
 
-  # ---- private api
+    return capture()
 
   def _monitor_members(self):
     def wait_exists():
-     self._zk.aexists(self._path, exists_watch, exists_completion)
+      self._zk.exists_async(self._path, exists_watch).rawlink(exists_completion)
 
-    def exists_watch(_, event, state, path):
-      if event == zookeeper.SESSION_EVENT and state == zookeeper.EXPIRED_SESSION_STATE:
+    def exists_watch(event):
+      if event.state == KeeperState.EXPIRED_SESSION:
         wait_exists()
         return
-      if event == zookeeper.CREATED_EVENT:
+      if event.type == EventType.CREATED:
         do_monitor()
-      elif event == zookeeper.DELETED_EVENT:
+      elif event.type == EventType.DELETED:
         wait_exists()
 
-    def exists_completion(_, rc, stat):
-      if rc == zookeeper.OK:
+    def exists_completion(result):
+      try:
+        stat = result.get()
+      except self.DISCONNECT_EXCEPTIONS:
+        self._once(KazooState.CONNECTED, wait_exists)
+        return
+      except ke.NoNodeError:
+        wait_exists()
+        return
+      except ke.KazooException as e:
+        log.warning('Unexpected exists_completion result: (%s)%s' % (type(e), e))
+        return
+
+      if stat:
         do_monitor()
 
     def do_monitor():
-      self._zk.aget_children(self._path, membership_watch, membership_completion)
+      self._zk.get_children_async(self._path, get_watch).rawlink(get_completion)
 
-    def membership_watch(_, event, state, path):
-      # Connecting state is caused by transient connection loss, ignore
-      if state == zookeeper.CONNECTING_STATE:
-        return
-      if event == zookeeper.DELETED_EVENT:
+    def get_watch(event):
+      if event.state == KeeperState.EXPIRED_SESSION:
         wait_exists()
         return
-      # Everything else indicates underlying change.
+      if event.state != KeeperState.CONNECTED:
+        return
+      if event.type == EventType.DELETED:
+        wait_exists()
+        return
+
       do_monitor()
 
-    def membership_completion(_, rc, children):
-      if rc in self._zk.COMPLETION_RETRY:
-        do_monitor()
+    def get_completion(result):
+      try:
+        children = result.get()
+      except self.DISCONNECT_EXCEPTIONS:
+        self._once(KazooState.CONNECTED, do_monitor)
         return
-      if rc == zookeeper.NONODE:
+      except ke.NoNodeError:
         wait_exists()
         return
-      if rc != zookeeper.OK:
+      except ke.KazooException as e:
+        log.warning('Unexpected get_completion result: (%s)%s' % (type(e), e))
         return
 
       children = [child for child in children if self.znode_owned(child)]

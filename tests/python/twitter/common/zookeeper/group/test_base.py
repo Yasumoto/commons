@@ -42,7 +42,7 @@ class GroupTestBase(object):
   @classmethod
   def session_id(cls, zk):
     raise NotImplementedError
-  
+
   def setUp(self):
     if GroupTestBase.SERVER is None:
       GroupTestBase.SERVER = ZookeeperServer()
