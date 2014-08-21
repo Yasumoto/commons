@@ -16,8 +16,8 @@
 
 import unittest
 
-from twitter.common.zookeeper.group.kazoo_group import ActiveKazooGroup, Membership
-from twitter.common.zookeeper.group.test_kazoo_group import TestKazooGroup
+from twitter.common.zookeeper.group.group import ActiveGroup, Membership
+from twitter.common.zookeeper.group.test_group import TestGroup
 
 from kazoo.client import KazooClient
 from kazoo.exceptions import NoNodeError, SessionExpiredError
@@ -45,7 +45,7 @@ def _happy_path(group, mock_zk, num_members):
 
   members = []
   for member_id in range(834, 834 + num_members):
-    znode_member_id = ActiveKazooGroup.id_to_znode(member_id)
+    znode_member_id = ActiveGroup.id_to_znode(member_id)
     mock_get_children_result = Mock(name='mock get children async result')
     mock_get_children_result.get = Mock(return_value=[znode_member_id])
 
@@ -76,8 +76,8 @@ def _unhappy_path(mock_zk, side_effect):
 
   completion_callback(mock_async_result)
 
-class TestActiveKazooGroup(TestKazooGroup, unittest.TestCase):
-  GroupImpl = ActiveKazooGroup
+class TestActiveGroup(TestGroup, unittest.TestCase):
+  GroupImpl = ActiveGroup
 
   def test_should_watch_group_path_on_init(self):
     mock_zk = _mock_zk()
@@ -86,7 +86,7 @@ class TestActiveKazooGroup(TestKazooGroup, unittest.TestCase):
     mock_zk.get_children_async.return_value = mock_async_result
 
     # we're asserting on the side effects of creating the group
-    ActiveKazooGroup(mock_zk, DEFAULT_PATH)
+    ActiveGroup(mock_zk, DEFAULT_PATH)
 
     mock_zk.get_children_async.assert_called_with(DEFAULT_PATH, ANY)
     mock_async_result.rawlink.assert_called_with(ANY)
@@ -94,19 +94,19 @@ class TestActiveKazooGroup(TestKazooGroup, unittest.TestCase):
   def test_updates_internal_state_when_children_are_added(self):
     mock_zk = _mock_zk()
 
-    group = ActiveKazooGroup(mock_zk, DEFAULT_PATH)
+    group = ActiveGroup(mock_zk, DEFAULT_PATH)
 
     _happy_path(group, mock_zk, 2)
 
   def test_updates_internal_state_when_children_are_removed(self):
     mock_zk = _mock_zk()
 
-    group = ActiveKazooGroup(mock_zk, DEFAULT_PATH)
+    group = ActiveGroup(mock_zk, DEFAULT_PATH)
 
     members, completion_callback = _happy_path(group, mock_zk, 2)
 
     member_remaining, member_removed = list(members)
-    znode_member_id = ActiveKazooGroup.id_to_znode(member_remaining.id)
+    znode_member_id = ActiveGroup.id_to_znode(member_remaining.id)
     mock_get_children_result = Mock(name='mock get children async result')
     mock_get_children_result.get = Mock(return_value=[znode_member_id])
 
@@ -122,7 +122,7 @@ class TestActiveKazooGroup(TestKazooGroup, unittest.TestCase):
     def first_callback(*args, **kwargs):
       group.monitor(frozenset([Membership(1)]), mock_callback)
 
-    group = ActiveKazooGroup(mock_zk, DEFAULT_PATH)
+    group = ActiveGroup(mock_zk, DEFAULT_PATH)
     group.monitor(callback=first_callback)
 
     members, _ = _happy_path(group, mock_zk, 1)
@@ -136,13 +136,13 @@ class TestActiveKazooGroup(TestKazooGroup, unittest.TestCase):
 
     def devnull(*args, **kwargs): pass
 
-    group = ActiveKazooGroup(mock_zk, DEFAULT_PATH)
+    group = ActiveGroup(mock_zk, DEFAULT_PATH)
     group.monitor(frozenset([]), mock_callback)
 
     members, completion_callback = _happy_path(group, mock_zk, 2)
 
     member_remaining, member_removed = list(members)
-    znode_member_id = ActiveKazooGroup.id_to_znode(member_remaining.id)
+    znode_member_id = ActiveGroup.id_to_znode(member_remaining.id)
     mock_get_children_result = Mock(name='mock get children async result')
     mock_get_children_result.get = Mock(return_value=[znode_member_id])
 
@@ -156,7 +156,7 @@ class TestActiveKazooGroup(TestKazooGroup, unittest.TestCase):
     mock_zk = _mock_zk()
 
     # we're asserting on the side effects of creating the group
-    ActiveKazooGroup(mock_zk, DEFAULT_PATH)
+    ActiveGroup(mock_zk, DEFAULT_PATH)
 
     _unhappy_path(mock_zk, NoNodeError)
 
@@ -166,21 +166,21 @@ class TestActiveKazooGroup(TestKazooGroup, unittest.TestCase):
   def test_sets_a_state_listener_if_disconnected(self):
     mock_zk = _mock_zk(state=KeeperState.EXPIRED_SESSION)
 
-    group = ActiveKazooGroup(mock_zk, DEFAULT_PATH)
+    group = ActiveGroup(mock_zk, DEFAULT_PATH)
 
-    assert len(group._KazooGroup__listener_queue) == 0
+    assert len(group._Group__listener_queue) == 0
 
     _unhappy_path(mock_zk, SessionExpiredError)
 
-    assert len(group._KazooGroup__listener_queue) == 1
-    state, _ = group._KazooGroup__listener_queue[0]
+    assert len(group._Group__listener_queue) == 1
+    state, _ = group._Group__listener_queue[0]
     assert state == KeeperState.CONNECTED
 
   def test_znode_watch_triggered_for_child_events_causes_reprocess(self):
     mock_zk = _mock_zk()
 
     # we're asserting on the side effects of creating the group
-    ActiveKazooGroup(mock_zk, DEFAULT_PATH)
+    ActiveGroup(mock_zk, DEFAULT_PATH)
 
     assert mock_zk.get_children_async.call_count == 1
 
@@ -198,7 +198,7 @@ class TestActiveKazooGroup(TestKazooGroup, unittest.TestCase):
     mock_zk = _mock_zk()
 
     # we're asserting on the side effects of creating the group
-    ActiveKazooGroup(mock_zk, DEFAULT_PATH)
+    ActiveGroup(mock_zk, DEFAULT_PATH)
 
     assert mock_zk.exists_async.call_count == 0
 
@@ -215,7 +215,7 @@ class TestActiveKazooGroup(TestKazooGroup, unittest.TestCase):
   def test_sets_a_state_listener_if_disconnected_in_exists_completion(self):
     mock_zk = _mock_zk(state=KeeperState.EXPIRED_SESSION)
 
-    group = ActiveKazooGroup(mock_zk, DEFAULT_PATH)
+    group = ActiveGroup(mock_zk, DEFAULT_PATH)
 
     _unhappy_path(mock_zk, NoNodeError)
 
@@ -226,14 +226,14 @@ class TestActiveKazooGroup(TestKazooGroup, unittest.TestCase):
 
     exists_completion(mock_async_result)
 
-    assert len(group._KazooGroup__listener_queue) == 1
-    state, _ = group._KazooGroup__listener_queue[0]
+    assert len(group._Group__listener_queue) == 1
+    state, _ = group._Group__listener_queue[0]
     assert state == KeeperState.CONNECTED
 
   def test_watches_again_if_no_node_raised_in_exists_completion(self):
     mock_zk = _mock_zk(state=KeeperState.EXPIRED_SESSION)
 
-    ActiveKazooGroup(mock_zk, DEFAULT_PATH)
+    ActiveGroup(mock_zk, DEFAULT_PATH)
 
     _unhappy_path(mock_zk, NoNodeError)
 
@@ -251,7 +251,7 @@ class TestActiveKazooGroup(TestKazooGroup, unittest.TestCase):
   def test_monitors_when_watched_node_is_created(self):
     mock_zk = _mock_zk(state=KeeperState.EXPIRED_SESSION)
 
-    ActiveKazooGroup(mock_zk, DEFAULT_PATH)
+    ActiveGroup(mock_zk, DEFAULT_PATH)
 
     _unhappy_path(mock_zk, NoNodeError)
 

@@ -21,7 +21,7 @@ DEFAULT_RETRY_DICT = dict(
 )
 
 
-class TwitterKazooClient(KazooClient, Observable):
+class TwitterClient(KazooClient, Observable):
   @classmethod
   def make(cls, *args, **kw):
     # TODO(jcohen): Consider removing verbose option entirely in favor of just using loglevel.
@@ -54,7 +54,7 @@ class TwitterKazooClient(KazooClient, Observable):
       kw['connection_retry'] = KazooRetry(
           max_delay=DEFAULT_RETRY_MAX_DELAY_SECS, **DEFAULT_RETRY_DICT)
 
-    super(TwitterKazooClient, self).__init__(*args, **kw)
+    super(TwitterClient, self).__init__(*args, **kw)
     self.connecting = threading.Event()
     self.__session_expirations = AtomicGauge('session_expirations')
     self.__connection_losses = AtomicGauge('connection_losses')
@@ -71,7 +71,7 @@ class TwitterKazooClient(KazooClient, Observable):
       self.__connection_losses.increment()
 
   def _session_callback(self, state):
-    rc = super(TwitterKazooClient, self)._session_callback(state)
+    rc = super(TwitterClient, self)._session_callback(state)
     if state == KeeperState.CONNECTING:
       self.connecting.set()
     return rc

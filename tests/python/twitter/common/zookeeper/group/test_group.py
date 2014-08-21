@@ -18,21 +18,21 @@ import threading
 import unittest
 
 from twitter.common.zookeeper.group.group_base import Membership
-from twitter.common.zookeeper.group.kazoo_group import KazooGroup
+from twitter.common.zookeeper.group.group import Group
 from twitter.common.zookeeper.group.test_base import GroupTestBase
-from twitter.common.zookeeper.kazoo_client import TwitterKazooClient
+from twitter.common.zookeeper.client import TwitterClient
 
 from kazoo.protocol.states import KazooState
 import kazoo.security as ksec
 
 
-class AlternateKazooGroup(KazooGroup):
+class AlternateGroup(Group):
   MEMBER_PREFIX = 'herpderp_'
 
 
-class TestKazooGroup(GroupTestBase, unittest.TestCase):
-  GroupImpl = KazooGroup
-  AlternateGroupImpl = AlternateKazooGroup
+class TestGroup(GroupTestBase, unittest.TestCase):
+  GroupImpl = Group
+  AlternateGroupImpl = AlternateGroup
   ACLS = dict(
     OPEN_ACL_UNSAFE=ksec.OPEN_ACL_UNSAFE,
     CREATOR_ACLL_ACL=ksec.CREATOR_ALL_ACL,
@@ -47,7 +47,7 @@ class TestKazooGroup(GroupTestBase, unittest.TestCase):
   def make_zk(cls, ensemble, **kw):
     if 'authentication' in kw:
       kw.update(auth_data = [kw.pop('authentication')])
-    tzk = TwitterKazooClient.make(
+    tzk = TwitterClient.make(
         ensemble + ('/%08d' % GroupTestBase.CHROOT_PREFIX),
         timeout=cls.CONNECT_TIMEOUT_SECS,
         max_retries=cls.CONNECT_RETRIES, **kw)
