@@ -13,7 +13,7 @@ def pick_kazoo_group(zk, on_join, on_leave):
   # on_join or on_leave, then use ActiveGroup by default, which has better
   # performance on monitor/iter calls.
   if isinstance(zk, KazooClient):
-    return KazooGroup if (on_join is None and on_leave is None) else ActiveKazooGroup
+    return Group if (on_join is None and on_leave is None) else ActiveGroup
 
 GROUP_SELECTORS = [pick_kazoo_group]
 

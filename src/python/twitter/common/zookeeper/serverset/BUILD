@@ -3,8 +3,9 @@ python_library(
   sources = globs('*.py') - ['cli.py'],
   dependencies = [
     pants('src/python/twitter/common/lang'),
-    pants('src/python/twitter/common/zookeeper/group:group_base'),
+    pants('src/python/twitter/common/zookeeper/group:group'),
     pants('src/thrift/com/twitter/thrift:py-thrift'),
+    pants('3rdparty/python:kazoo'),
     pants('3rdparty/python:thrift'),
   ]
 )

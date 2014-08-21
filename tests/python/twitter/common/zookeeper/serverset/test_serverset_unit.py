@@ -18,7 +18,7 @@ from twitter.common.zookeeper.serverset.endpoint import ServiceInstance
 from twitter.common.zookeeper.serverset.serverset import ServerSet
 from twitter.common.zookeeper.group.group_base import GroupInterface, Membership
 
-from twitter.common.zookeeper.group.kazoo_group import ActiveKazooGroup
+from twitter.common.zookeeper.group.group import ActiveGroup
 
 from kazoo.client import KazooClient
 
@@ -45,13 +45,13 @@ SERVICE_INSTANCE_JSON = '''{
 }'''
 
 
-@mock.patch('twitter.common.zookeeper.serverset.serverset.ActiveKazooGroup')
+@mock.patch('twitter.common.zookeeper.serverset.serverset.ActiveGroup')
 @mock.patch('twitter.common.zookeeper.serverset.serverset.validate_group_implementation')
-def test_internal_monitor(mock_group_impl_validator, MockActiveKazooGroup):
+def test_internal_monitor(mock_group_impl_validator, MockActiveGroup):
   mock_zk = mock.Mock(spec=KazooClient)
   mock_group = mock.MagicMock(spec=GroupInterface)
-  MockActiveKazooGroup.mock_add_spec(ActiveKazooGroup)
-  MockActiveKazooGroup.return_value = mock_group
+  MockActiveGroup.mock_add_spec(ActiveGroup)
+  MockActiveGroup.return_value = mock_group
 
   # by default it tries to assert that the group impl is a subclass of GroupInterface
   # since the group impl will be a mock, it doesn't pass that check, so we mock the validator
