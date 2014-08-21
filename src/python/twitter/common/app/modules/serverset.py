@@ -124,7 +124,6 @@ class ServerSetModule(app.Module):
   def _construct_serverset(self, options):
     import socket
     import threading
-    import zookeeper
     from twitter.common.zookeeper.client import ZooKeeper
     from twitter.common.zookeeper.serverset import Endpoint, ServerSet
     log.debug('ServerSet module constructing serverset.')

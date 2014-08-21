@@ -13,7 +13,7 @@ python_library(
   dependencies = [
     pants(':group_base'),
     pants('src/python/twitter/common/concurrent'),
-    pants('src/python/twitter/common/zookeeper:kazoo_client'),
+    pants('src/python/twitter/common/zookeeper:client'),
   ]
 )
 

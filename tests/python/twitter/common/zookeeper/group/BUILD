@@ -1,11 +1,12 @@
 python_test_suite(
   name = 'group',
   dependencies = [
-    pants(':test_kazoo_group'),
+    pants(':test_base'),
+    pants(':test_group'),
   ],
 )
 
-python_library(
+python_tests(
   name = 'test_base',
   sources = ['test_base.py'],
   dependencies = [
@@ -13,23 +14,21 @@ python_library(
   ]
 )
 
-python_library(
-  name = 'test_kazoo_group_lib',
-  sources = ['test_kazoo_group.py'],
+python_tests(
+  name = 'test_group_lib',
+  sources = ['test_group.py'],
   dependencies = [
-    pants(':test_base'),
     pants('src/python/twitter/common/zookeeper:testing'),
   ]
 )
 
 python_tests(
-  name = 'test_kazoo_group',
-  sources = ['test_active_kazoo_group.py', 'test_kazoo_group.py'],
+  name = 'test_group',
+  sources = ['test_active_group.py', 'test_group.py'],
   dependencies = [
     pants('3rdparty/python:kazoo'),
     pants('3rdparty/python:mock'),
-    pants(':test_kazoo_group_lib'),
-    pants('src/python/twitter/common/zookeeper/group:kazoo_group'),
+    pants('src/python/twitter/common/zookeeper/group'),
   ],
-  coverage = 'twitter.common.zookeeper.group.kazoo_group'
+  coverage = 'twitter.common.zookeeper.group.group'
 )

@@ -33,7 +33,7 @@ def partition(items, predicate=bool):
   return ([item for pred, item in a if not pred], [item for pred, item in b if pred])
 
 
-class KazooGroup(GroupBase, GroupInterface):
+class Group(GroupBase, GroupInterface):
   """
     An implementation of GroupInterface against Kazoo.
   """
@@ -60,7 +60,7 @@ class KazooGroup(GroupBase, GroupInterface):
 
   def __init__(self, zk, path, acl=None):
     if not isinstance(zk, KazooClient):
-      raise TypeError('KazooGroup must be initialized with a KazooClient')
+      raise TypeError('Group must be initialized with a KazooClient')
     self._zk = zk
     self.__state = zk.state
     self.__listener_queue = []
@@ -310,9 +310,9 @@ class KazooGroup(GroupBase, GroupInterface):
         wait_event.wait()
 
 
-class ActiveKazooGroup(KazooGroup):
+class ActiveGroup(Group):
   def __init__(self, *args, **kwargs):
-    super(ActiveKazooGroup, self).__init__(*args, **kwargs)
+    super(ActiveGroup, self).__init__(*args, **kwargs)
     self._monitor_queue = []
     self._monitor_members()
 
