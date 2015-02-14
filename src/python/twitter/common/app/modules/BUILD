@@ -27,7 +27,21 @@ python_library(
     ":scribe_exceptions",
     ":serverset",
     ":vars",
-  ]
+  ],
+  provides = setup_py(
+    name = 'twitter.common.app.modules',
+    version = commons_version(),
+    description = "Twitter's Python application modules for additional functionality.",
+    url = 'https://github.com/twitter/commons/tree/master/src/python/twitter/common/app/modules',
+    license = 'Apache License, Version 2.0',
+    zip_safe = True,
+    classifiers = [
+      'Intended Audience :: Developers',
+      'License :: OSI Approved :: Apache Software License',
+      'Operating System :: OS Independent',
+      'Programming Language :: Python',
+    ]
+  )
 )
 
 python_library(
